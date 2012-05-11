@@ -22,12 +22,17 @@ class lock():
     # Create the lockfile and writes the PID in it
     def __enter__(self):
 
-        if os.path.exists(self.lockfile):
+        try:
+            fd = os.open(self.lockfile, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        except:
             fd = open(self.lockfile)
             pid = fd.read()
             fd.close()
-            raise Exception("lockfile %s exists with PID %s" % (self.lockfile, pid))
-
+            print("lockfile %s exists with PID %s" % (self.lockfile, pid))
+            exit(1)
+        # I .. I dont know how to do that....   :_(
+#        os.write(fd, os.getpid())
+        os.close(fd)
         fd = open(self.lockfile, 'w')
         fd.write(str(os.getpid()))
         fd.close()
@@ -36,3 +41,4 @@ class lock():
     def __exit__(self, etype, evalue, traceback):
         if etype is None:
             os.unlink(self.lockfile)
+
