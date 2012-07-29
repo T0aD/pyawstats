@@ -6,10 +6,16 @@ import os.path
 import sys
 
 """
-Usage:
+=========================== Usage:
 import lock
 
 with lock.Lock(__file__):
+  main program
+
+=========================== Or:
+from lock import Lock
+
+with Lock():
   main program
 """
 
@@ -20,7 +26,10 @@ class Lock():
     def __init__(self, name = False):
         # Leet hack if no name was specified:
         if name is False:
-            name = sys._getframe(1).f_code.co_filename
+            name = sys.argv[0]
+            # Seems overkill now that argv[0] seems to be OK (why did I want that anyway?)
+#            name = sys._getframe(1).f_code.co_filename 
+            name = os.path.basename(name)
         self.lockfile = os.path.realpath(os.path.join(self.path, name.replace('.py', '.lock')))
 
     # Create the lockfile and writes the PID in it
@@ -31,7 +40,16 @@ class Lock():
             fd = open(self.lockfile)
             pid = fd.read()
             fd.close()
-            print("lockfile %s exists with PID %s" % (self.lockfile, pid))
+            # Try to see if a process is actually running with this PID:
+            # (Linux)
+            if os.path.exists('/proc/%s/cmdline' % pid):
+                fd = open('/proc/%s/cmdline' % pid)
+                prog = fd.read()
+                fd.close()
+                running = 'Program still running: %s' % prog.replace('\0', ' ')
+            else:
+                running = 'No process running'
+            print("lockfile %s exists with PID %s (%s)" % (self.lockfile, pid, running))
             exit(1)
         os.write(fd, bytes(str(os.getpid()), 'ascii'))
         os.close(fd)
