@@ -23,14 +23,18 @@ class Lock():
     path = '/var/tmp'
 
     # Just generate the full sexy path to the lockfile
-    def __init__(self, name = False):
+    def __init__(self, name = False, path = False):
         # Leet hack if no name was specified:
         if name is False:
             name = sys.argv[0]
             # Seems overkill now that argv[0] seems to be OK (why did I want that anyway?)
 #            name = sys._getframe(1).f_code.co_filename 
             name = os.path.basename(name)
-        self.lockfile = os.path.realpath(os.path.join(self.path, name.replace('.py', '.lock')))
+        if not path is False:
+            self.path = path
+        if name.endswith('.py'):
+            name = name[:len(name)-3]
+        self.lockfile = os.path.realpath(os.path.join(self.path, name + '.lock'))
 
     # Create the lockfile and writes the PID in it
     def __enter__(self):
