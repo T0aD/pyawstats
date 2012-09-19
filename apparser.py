@@ -2,6 +2,29 @@
 import re
 import os.path
 
+# Kudos go to flox @freenode #python-fr
+months = {'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun':'06',
+          'Jul':'07', 'Aug':'08', 'Sep':'09', 'Oct': '10', 'Nov':'11', 'Dec':'12'}
+def _parse(line):
+    idx = line.find('[')
+    return line[idx + 8:idx + 12], months[line[idx + 4:idx + 7]], line[idx + 1:idx + 3]
+(slice_day, slice_month, slice_year) = slice(2), slice(3, 6), slice(7, 11)
+def _parse2(line):
+    line, line, line = line.partition(' [')
+    return line[slice_year], months[line[slice_month]], line[slice_day]
+
+import socket
+class ipResolver():
+    cache = {}
+    def get(self, hostname):
+        if hostname in self.cache:
+            return self.cache[hostname]
+        ret = socket.gethostbyname(hostname)
+        self.cache[hostname] = ret
+        return ret
+
+
+
 class apparser:
     # Configuration
     months = {'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun':'06',
@@ -63,6 +86,14 @@ class apparser:
         self.year, self.month, self.day = (year, month, day)
         return None
 
+    # Compile pattern
+    def __init__(self):
+        self.patternCompiled = re.compile(self.pattern)
+        self.patternAltCompiled = re.compile(self.pat_alt)
+        self.resolver = ipResolver()
+
+        self.num = re.compile('^[0-9]')
+
     # Parse apache line
     def feed(self, line):
 #        self.parsed += 1
@@ -71,20 +102,22 @@ class apparser:
         self.ext = None
 
         # Parse the line
-        m = re.match(self.pattern, line)
+#        m = re.match(self.pattern, line)
+        m = self.patternCompiled.match(line)
         if m == None: # bad format...
             # Special case, HTTP/1.1 request with a blank host:
             # echo -e "GET / HTTP/1.1\nHost:\r\n" | nc 217.73.17.12 80
-            m = re.match(self.pat_alt, line)
+#            m = re.match(self.pat_alt, line)
+            m = self.patternAltCompiled.match(line)
             if m == None:
 #                print('BAD:', line)
                 self.parsed_but_bad += 1
                 return False
-
+# LogFormat "%V %h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" complete
 # sillusprojet.lescigales.org 188.143.232.25 - - [25/Apr/2012:06:52:06 +0200] "GET /forum/newreply.php?tid=273 HTTP/1.0" 200 6685 "http://sillusprojet.lescigales.org/newreply.php?tid=273" "Mozilla/0.91 Beta (Windows)"
 # segpachene.lescigales.org 193.49.248.69 - - [23/Apr/2012:07:34:14 +0200] "GET /intramessenger/distant/actions.php?a=20&iu=Mzg&is=MzQ1Mw&v=34&bi=MA&ip=MTAuMzguNzcuMTQ3& HTTP/1.0" 200 529 "-" ""
 
-        vhost, ip, user, wtf, date, req, code, size, referer, uagent = m.groups()
+        vhost, ip, ident, user, date, req, code, size, referer, uagent = m.groups()
         if vhost == ' ': # pat_alt was matched and no vhost was entered, so we need to correct that
             vhost = ''
 #        return True
@@ -98,10 +131,9 @@ class apparser:
         self.minsec, self.tz = (min + sec, g)
 
         # Req
-
         m = re.match(self.req_pattern, req)
         if m is None:
-            print('couldnt parse req:', req, vhost)
+#            print('couldnt parse req:', req, vhost)
             return False
         query, uri, proto = m.groups()
 
@@ -126,10 +158,33 @@ class apparser:
 #            if not self.pages.has_key(ext):
 #                self.pages[ext] = True
 
-        # Exporting data
+#        num = re.compile('^[0-9]')
+
+
+        # Check if we logged the reverse host instead of real IP address
+        first = ord(ip[0])
+        if first < 49 or first > 57:
+#            print('NOT AN IP:', ip)
+            pass
+#            print('*', end='')
+        
+#        if not self.num.match(ip):
+#            ipaddr = self.resolver.get(ip)
+#            print('NOT AN IP:', ip, ipaddr)
+#            print('NOT AN IP:', ip)
+#            ip = ipaddr
+
+
+#        if user != '-' or ident != '-':
+#            print(vhost, user, ident)
+
+ #       return (ext, year + month, vhost, ip, user, ident, referer, uagent, query, uri, rest, proto, code, size, year, month, day, hour, date)
+#        return True
+
+        # Exporting data (5000 lines/sec loss when done)
         self.ext = ext
         self.db_id = year + month
-        self.vhost, self.ip, self.user, self.wtf = (vhost, ip, user, wtf)
+        self.vhost, self.ip, self.user, self.ident = (vhost, ip, user, ident)
         self.referer, self.uagent = (referer, uagent)
         self.query, self.uri, self.rest, self.proto = (query, uri, rest, proto)
         self.code, self.size = (code, size)

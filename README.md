@@ -20,3 +20,12 @@ country: United States code: US
 
 Basic parser is in parser.py, happy reading !
 
+
+## Reorder log file per day
+
+``` shell
+$ ./wsorter.py ./logs/final/2012/01/
+```
+
+This will create the directory ./logs/final/2012/01-new/ with the merged logs...
+

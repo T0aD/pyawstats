@@ -1,6 +1,5 @@
 #! /usr/bin/python3.1
-
-# Print the order of a list of apache log files
+# Sort a directory of apache log files
 import sys
 import os.path
 import io
@@ -22,9 +21,6 @@ slice_hour, slice_min, slice_sec = slice(12, 14), slice(15, 17), slice(18, 20)
 def parse(line):
     line, line, line = line.partition(' [')
     return line[slice_year], months[line[slice_month]], line[slice_day], line[slice_hour], line[slice_min], line[slice_sec]
-
-#for i in range(1, 32):
-#    print('%02d' % i)
 
 def parseFile(f):
     fd = open(f)

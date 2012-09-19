@@ -6,6 +6,10 @@ import io
 import re
 import geoip
 import time
+import gzip
+import timer
+
+import httpagentparser as hua
 
 if len(sys.argv) < 2:
     print("syntax:", sys.argv[0], "<logfile>")
@@ -19,124 +23,14 @@ else:
 def die(msg):
     print(msg)
     exit()
+def working(msg):
+    print(msg, end='')
+    sys.stdout.flush()
 
 if not sys.argv[1].startswith('/'):
     logfile = os.path.realpath(os.getcwd() + '/' + sys.argv[1])
 else:
     logfile = os.path.realpath(sys.argv[1])
-
-class timer:
-    def __init__(self, lines = 0):
-        self.time, self.lines = (time.time(), lines)
-    def stop(self, msg, lines):
-        ct = time.time()
-        dt = ct - self.time
-        dl = lines - self.lines
-#        print('%f - %f = %f' % (lines, self.lines, dl))
-        self.lines = lines
-        self.time = ct
-        info = '%5d l/s' % (dl / dt,)
-        if dt < 0.5:
-            print('%s took %0.2f ms %s' % (msg, dt * 1000, info))
-        else:
-            print('%s took %0.2f s %s' % (msg, dt, info))
-
-# BEGIN
-class apparser:
-    # Configuration
-    months = {'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun':'06',
-              'Jul':'07', 'Aug':'08', 'Sep':'09', 'Oct': '10', 'Nov':'11', 'Dec':'12'}
-    notapage = {'css':1, 'js':1, 'class':1, 'gif':1, 'jpg':1, 'jpeg':1, 'png':1, 'bmp':1, 'swf':1}
-
-    # Apache line pattern
-    pattern = '^([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+) \[(.+)\] "(.+)" ([^ ]+) ([^ ]+) "(.+|)" "(.+|)"$'
-    pat_alt = '^([ ]+)([^ ]+) ([^ ]+) ([^ ]+) \[(.+)\] "(.+)" ([^ ]+) ([^ ]+) "(.+|)" "(.+|)"$'
-
-    # Request line pattern (ie GET / HTTP/1.0)
-    req_pattern = '([^ ]+) ([^ ]+) ([^ ]+)'
-
-    pages = {}
-    codes = {}
-    exts = {}
-    parsed = 0 # Number of lines parsed
-    parsed_but_bad = 0
-
-    # Parse apache line
-    def feed(self, line):
-#        self.parsed += 1
-
-        # Reset all properties
-        self.is_page = False
-        self.ext = None
-
-        # Parse the line
-        m = re.match(self.pattern, line)
-        if m == None: # bad format...
-            # Special case, HTTP/1.1 request with a blank host:
-            # echo -e "GET / HTTP/1.1\nHost:\r\n" | nc 217.73.17.12 80
-            m = re.match(self.pat_alt, line)
-            if m == None:
-#                print('BAD:', line)
-                self.parsed_but_bad += 1
-                return False
-
-# sillusprojet.lescigales.org 188.143.232.25 - - [25/Apr/2012:06:52:06 +0200] "GET /forum/newreply.php?tid=273 HTTP/1.0" 200 6685 "http://sillusprojet.lescigales.org/newreply.php?tid=273" "Mozilla/0.91 Beta (Windows)"
-# segpachene.lescigales.org 193.49.248.69 - - [23/Apr/2012:07:34:14 +0200] "GET /intramessenger/distant/actions.php?a=20&iu=Mzg&is=MzQ1Mw&v=34&bi=MA&ip=MTAuMzguNzcuMTQ3& HTTP/1.0" 200 529 "-" ""
-
-        vhost, ip, user, wtf, date, req, code, size, referer, uagent = m.groups()
-        if vhost == ' ': # pat_alt was matched and no vhost was entered, so we need to correct that
-            vhost = ''
-#        return True
-        # Warning: the +0200
-        d, g = date.split(' ') # g stands for garbage
-        date, hour, min, sec = d.split(':')
-        day, month, year = date.split('/')
-        month = self.months[month]
-        date = year + month + day + hour + min + sec + g
-        self.minsec, self.tz = (min + sec, g)
-
-        # Req
-
-        m = re.match(self.req_pattern, req)
-        if m is None:
- #           print('couldnt parse req:', req, vhost)
-            return False
-        query, uri, proto = m.groups()
-
-        # Get baseURI
-        if not uri.find('?') == -1:
-            old = uri
-            uri, rest = uri.split('?', 1)
-        else:
-            rest = ''
-        ext = None
-        filename = os.path.basename(uri)
-        if not filename == '' and not filename.find('.') == -1:
-            g, ext = filename.rsplit('.', 1)
-
-#        if not code in self.codes:
-#            self.codes[code] = True
-        if not ext is None:
-            if not ext in self.exts:
-                self.exts[ext] = True
-            if not ext in self.notapage:
-                self.is_page = True
-#            if not self.pages.has_key(ext):
-#                self.pages[ext] = True
-
-        # Exporting data
-        self.ext = ext
-        self.db_id = year + month
-        self.vhost, self.ip, self.user, self.wtf = (vhost, ip, user, wtf)
-        self.referer, self.uagent = (referer, uagent)
-        self.query, self.uri, self.rest, self.proto = (query, uri, rest, proto)
-        self.code, self.size = (code, size)
-        self.year, self.month, self.day, self.hour, self.date = (year, month, day, hour, date)
-        return True
-
-# END
-
-parser = apparser()
 
 #codes = {}
 #exts = {}
@@ -159,7 +53,7 @@ CREATE TABLE hits (
 )
 """
 
-class model_hits:
+class model_hits3434:
     CREATE = """
 CREATE TABLE hits (
         date integer,
@@ -177,12 +71,13 @@ CREATE TABLE hits (
         pass
 
 class uniques:
-    data = {} # thats our stash baby!
     def __init__(self, db):
+        self.data = {} # thats our stash baby!
         self.table = self.__class__.__name__
         self.db = db
         self.SELECT = 'SELECT id FROM %s WHERE name = ?' % self.table
         self.INSERT = 'INSERT INTO %s (name) VALUES (?)' % self.table
+        self.INSERT2 = 'INSERT INTO %s (id, name) VALUES (?, ?)' % self.table
         self.CREATE = "CREATE TABLE %s (id integer primary key, name text)" % self.table
         # Try to create the table
         try:
@@ -190,11 +85,32 @@ class uniques:
         except sqlite3.OperationalError as e:
             pass
 
+        # We load all the data (speeds parsing)
+        query = 'SELECT id, name FROM %s' % self.table
+        c = db.cursor()
+        c.execute(query)
+        r = c.fetchall()
+
+        id = 0 # in case our table is empty
+        for id, name in r:
+            self.data[name] = id
+        # Allows us not to store IDs before that point:
+        self.lastID = id
+
+        # To be able to increment without querying sqlite:
+        self.maxID = id
+        print('LOADED %10s -> %10d records' % (self.table, self.maxID))
+
     # Returns unique ID for the given name
     def get(self, name):
         # Fetch from local cache
         if name in self.data:
             return self.data[name]
+        else:
+            self.maxID += 1
+            self.data[name] = self.maxID
+            return self.maxID
+
         # Fetch from database
         c = self.db.cursor()
         c.execute(self.SELECT, (name, ))
@@ -208,6 +124,16 @@ class uniques:
         # Inserting into local cache
         self.data[name] = r[0]
         return self.data[name]
+
+    # Ohlala! no more need for autoincrement values! (33,000 lines per second saved)
+    def save(self):
+        print('SAVING %10s -> %10d records' % (self.table, self.maxID - self.lastID))
+        currentID = self.lastID
+        c = self.db.cursor()
+        for name in self.data:
+            currentID = self.data[name]
+            if currentID > self.lastID:
+                c.execute(self.INSERT2, (currentID, name))
 
 class vhosts(uniques):
     pass
@@ -234,40 +160,40 @@ class hours(uniques): # 2012042606
 
 # Manage database creation...
 class storer:
-    dbs = {}
-    db = None
-    CREATE = "CREATE TABLE %s (id integer primary key, name text)"
-    DATABASE = 'apache_%s.sqlite'
+    def __init__(self):
+        self.dbs = {}
+        self.db = None
+        self.CREATE = "CREATE TABLE %s (id integer primary key, name text)"
+        self.DATABASE = 'apache_%s.sqlite'
     # Returns the connection to the database, create the database
     # if it doesnt exist
     def get(self, id):
- #       print(dbname)
-#        exit()
-#    def get(self, dbname):
-        if not id in self.dbs:
-            dbname = self.DATABASE % id
-            print('%s doesnt exist' % dbname)
-            c = sqlite3.connect(dbname)
-            self.dbs[id] = c
+        if id in self.dbs:
+            return self.dbs[id]
 
-            cu = c.cursor()
-            # Create structure of the database if necessary
-            try:
-                """
-                for table in ('vhosts', 'referers', 'uagents', 'ips', 'uris', 'rests',
-                              'queries', 'timezones', 'hours'):
-                    schema = self.CREATE % table
+        dbname = self.DATABASE % id
+#        print('%s doesnt exist' % dbname)
+        c = sqlite3.connect(dbname)
+        self.dbs[id] = c
+
+        cu = c.cursor()
+        # Create structure of the database if necessary
+        try:
+            """
+            for table in ('vhosts', 'referers', 'uagents', 'ips', 'uris', 'rests',
+                          'queries', 'timezones', 'hours'):
+                          schema = self.CREATE % table
                     try:
                         cu.execute(schema)
                         print('created', table)
                     except:
                         pass
                         """
-                # Create other tables:
-                cu.execute(schema_hits)
-                pass
-            except sqlite3.OperationalError as e:
-                pass
+            # Create other tables:
+            cu.execute(schema_hits)
+            pass
+        except sqlite3.OperationalError as e:
+            pass
 #            c.commit()
             """
             self.dbs[id] = {'conn': c, 'vhost': vhosts(c), 'referer': referers(c),
@@ -275,19 +201,21 @@ class storer:
                                 'rest': rests(c), 'query': queries(c), 'timezone': timezones(c),
                                 'hour': hours(c)}
                                 """
-            self.dbs[id] = {'conn': c, 'vhost': vhosts(c), 'referer': referers(c),
-                            'uagent': uagents(c), 'ip': ips(c), 'uri': uris(c),
-                            'country': countries(c)}
-            c.commit()
+        self.dbs[id] = {'conn': c, 'vhost': vhosts(c), 'referer': referers(c),
+                        'uagent': uagents(c), 'ip': ips(c), 'uri': uris(c),
+                        'country': countries(c), 'query': queries(c)}
+        c.commit()
         return self.dbs[id]
 
-storer = storer()
+    def commit(self, id):
+        d = self.get(id)
+        for name in d:
+            if name == 'conn':
+                continue
+            d[name].save()
+        d['conn'].commit()
 
-# Reading logfile
-try:
-    fd = io.open(logfile, 'r')
-except Exception as e:
-    die(e)
+storer = storer()
 
 geoip = geoip.geoip('geoip.sqlite')
 
@@ -306,50 +234,88 @@ statsIP = collections.defaultdict(dict)
 
 protocols = {'HTTP/1.0':0, 'HTTP/1.1':1, 'default':0}
 
-lineTimer = timer()
-while True:
-    if (i % 1001) == 0 and not i == 0:
+# Reading logfile
+try:
+    if logfile.endswith('.gz'):
+        fd = gzip.open(logfile, 'r')
+        gzipped = True
+    else:
+        fd = io.open(logfile, 'r')
+        gzipped = False
+except Exception as e:
+    die(e)
+
+#parser = apparser()
+import apparser
+parser = apparser.apparser()
+
+
+lineTimer = timer.timer()
+first = True
+shit = []
+country_cache = {}
+for line in fd:
+    if (i % 10001) == 0 and not i == 0:
         lineTimer.stop('parsed %10d lines' % i, i)
     if i > passes:
         break
-    i += 1
-    # We cannot strip the beginning of line (in case of empty vhost)
-
-    line = fd.readline()
-    if line == '': # EOF
-        break
-    line = line.rstrip("\n")
-    r = parser.feed(line)
+    i += 1 # heresy!
+    
+    if gzipped is True:
+        r = parser.feed(line.decode('ascii'))
+    else:
+        r = parser.feed(line)
     if r == False:
+        # Do we need to log those ? maybe so.. maybe so...
+#        print("FALSE", line)
         continue
+##    print(r)
+#    continue
 
     # Time identifiers
     month_id = parser.year + parser.month
     day_id = month_id + parser.day
     hour_id = day_id + parser.hour
 
-#    dbname = 'apache_%s.sqlite' % parser.db_id
+#    continue
     d = storer.get(month_id)
 
+
+    # Load previous parsing results if any (only the first line)
+    if first is True:
+        first = False
+
     # Collect unique informations
+
+#    print(parser.vhost)
+#    continue
     vhost_id = d['vhost'].get(parser.vhost)
+#    continue
+#    if not parser.referer is None:
+    ip_id = d['ip'].get(parser.ip)
+
+#    continue
     referer_id = d['referer'].get(parser.referer)
     uagent_id = d['uagent'].get(parser.uagent)
-    ip_id = d['ip'].get(parser.ip)
     uri_id = d['uri'].get(parser.uri)
-#    if parser.vhost != 'lescigales.org':
-#        continue
+
+    # experimental
+#    rest_id = d['rest'].get(parser.rest)
+    query_id = d['query'].get(parser.query)
+#    tz_id = d['timezone'].get(parser.tz)
+#    print(parser.query)
+#    hour_id2 = d['hour'].get(hour_id)
+
 
     # Reset size to 0
     if parser.size == '-' or parser.code == '304':
         parser.size = 0
     size = int(parser.size) # for next uses
 
-    # experimental
-#    rest_id = d['rest'].get(parser.rest)
-#    query_id = d['query'].get(parser.query)
-#    tz_id = d['timezone'].get(parser.tz)
-#    hour_id2 = d['hour'].get(hour_id)
+    # Reset referer to nothing
+    if parser.referer == '-' or parser.referer == '':
+        parser.referer = None
+
 
     # Compressor ?
     if parser.proto in protocols:
@@ -360,16 +326,23 @@ while True:
 #    print(vhost_id, ip_id, parser.user, parser.wtf, 
 #          hour_id2, parser.minsec, tz_id, query_id,
 #          uri_id, rest_id, proto, parser.code, parser.size, referer_id, uagent_id)
-#    continue
+
 
     # Increments hits
     # #########################
     cnt = collections.Counter({'hits': 1, 'traffic': size})
     for time_id in (month_id, day_id, hour_id):
+#        print(i, time_id)
         if not vhost_id in hits[time_id]:
-            hits[time_id][vhost_id] = cnt
+#            hits[time_id][vhost_id] = cnt
+            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+#            print(hits[time_id][vhost_id])
         else:
-            hits[time_id][vhost_id] += cnt
+#            hits[time_id][vhost_id] += cnt
+            hits[time_id][vhost_id]['hits'] += 1
+            hits[time_id][vhost_id]['traffic'] += size
+            
+#    continue
 
     ### Insert Special (vhost 0 for global stat)
     for time_id in (month_id, day_id, hour_id):
@@ -380,7 +353,7 @@ while True:
 
     # Increments referers
     # #########################
-    if not parser.referer == '-':
+    if not parser.referer is None:
         if parser.is_page == True:
             cnt = collections.Counter({'pages': 1, 'hits': 1})
         else:
@@ -400,6 +373,8 @@ while True:
         cnt = collections.Counter({'hits':1})
         if not vhost_id in e404[month_id]:
             e404[month_id][vhost_id] = {}
+#        if parser.referer is None:
+#            pass
         if not referer_id in e404[month_id][vhost_id]:
             e404[month_id][vhost_id][referer_id] = cnt
         else:
@@ -472,31 +447,43 @@ while True:
         else:
             statsExtensions[month_id][vhost_id][parser.ext] += cnt
 
+    # We should do that in a different process to improve the speed of log parsing:
+
     # Countries
     # #########################
-    countryName, countryCode = geoip.query(parser.ip)
-    if not countryCode == None:
-        country_id = d['country'].get(countryCode + '|' + countryName)
+    if parser.ip not in country_cache:
+#        print('resolving for', parser.ip)
+        countryName, countryCode = geoip.query(parser.ip)
+        if not countryCode == None:
+            country_id = d['country'].get(countryCode + '|' + countryName)
+        else:
+            country_id = 0
+        country_cache[parser.ip] = country_id
+    else:
+        country_id = country_cache[parser.ip]
 #        print(parser.ip, countryCode, countryName, country_id)
 
     # OS
     # #########################
     # Browser
     # #########################
+#    ua = hua.simple_detect(parser.uagent)
+#    ua2 = hua.detect(parser.uagent)
+
     # Robots
     # #########################
 
 
 
 print('stopped after', i, 'lines')
+lineTimer.average()
+#        lineTimer.stop('parsed %10d lines' % i, i)
+#exit()
 
 # Commit trial
 for dbname in storer.dbs:
-    print('commiting for', dbname, end='')
-    sys.stdout.flush()
-    d = storer.get(dbname)
-    d['conn'].commit()
-    print(' done')
+    print('=' * 10, dbname)
+    storer.commit(dbname)
 
 #exit()
 for time_id in statsIP:
@@ -548,12 +535,14 @@ for time_id in refs:
             continue
             print(time_id, vhost, referer, refs[time_id][vhost][referer])
 
+#exit()
+
 # Saving hits
 formatHITS = "INSERT INTO hits (vhost_id, date, frequency, hits, traffic) VALUES (?,?,?,?,?)"
 formatHITS2 = 'SELECT hits, traffic FROM hits WHERE vhost_id = ? AND date = ?'
 updateHITS = 'UPDATE hits SET hits = ?, traffic = ? WHERE vhost_id = ? AND date = ?'
 frequencies = {6:'month', 8:'day', 10:'hour'}
-print('saving hits... ', end='')
+working('saving hits... ')
 for time_id in hits:
     # Get the month_id (to target the database where to write)
     month_id = time_id[0:6]
