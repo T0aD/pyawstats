@@ -11,6 +11,8 @@ import timer
 
 import httpagentparser as hua
 
+#sys.setcheckinterval(400000)
+
 if len(sys.argv) < 2:
     print("syntax:", sys.argv[0], "<logfile>")
     exit()
@@ -203,7 +205,7 @@ class storer:
                                 """
         self.dbs[id] = {'conn': c, 'vhost': vhosts(c), 'referer': referers(c),
                         'uagent': uagents(c), 'ip': ips(c), 'uri': uris(c),
-                        'country': countries(c), 'query': queries(c)}
+                        'query': queries(c)}
         c.commit()
         return self.dbs[id]
 
@@ -232,7 +234,36 @@ statsHours = collections.defaultdict(dict)
 statsDays = collections.defaultdict(dict)
 statsIP = collections.defaultdict(dict)
 
+counter = collections.Counter
+
 protocols = {'HTTP/1.0':0, 'HTTP/1.1':1, 'default':0}
+
+# Test
+#hits = {}
+def update_hits2(vhost_id, size):
+    global hits
+    for time_id in (month_id, day_id, hour_id):
+        try:
+            hits[time_id][vhost_id]['hits'] += 1
+            hits[time_id][vhost_id]['traffic'] += size
+        except KeyError:
+            try:
+                hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+            except KeyError:
+#                print('first!', time_id)
+                hits[time_id] = {}
+                hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+
+
+def update_hits(vhost_id, size):
+    global hits
+    for time_id in (month_id, day_id, hour_id):
+        try:
+            hits[time_id][vhost_id]['hits'] += 1
+            hits[time_id][vhost_id]['traffic'] += size
+        except KeyError:
+            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+
 
 # Reading logfile
 try:
@@ -251,16 +282,19 @@ parser = apparser.apparser()
 
 
 lineTimer = timer.timer()
+sTimer = timer.timeit()
 first = True
 shit = []
 country_cache = {}
+updates = 0
+inserts = 0
 for line in fd:
     if (i % 10001) == 0 and not i == 0:
         lineTimer.stop('parsed %10d lines' % i, i)
     if i > passes:
         break
     i += 1 # heresy!
-    
+
     if gzipped is True:
         r = parser.feed(line.decode('ascii'))
     else:
@@ -269,43 +303,33 @@ for line in fd:
         # Do we need to log those ? maybe so.. maybe so...
 #        print("FALSE", line)
         continue
-##    print(r)
-#    continue
 
     # Time identifiers
     month_id = parser.year + parser.month
     day_id = month_id + parser.day
     hour_id = day_id + parser.hour
 
-#    continue
     d = storer.get(month_id)
 
 
     # Load previous parsing results if any (only the first line)
     if first is True:
+#        preload_hits(d, month_id, day_id, hour_id)
+        print(month_id, day_id, hour_id)
         first = False
 
     # Collect unique informations
-
-#    print(parser.vhost)
-#    continue
     vhost_id = d['vhost'].get(parser.vhost)
-#    continue
-#    if not parser.referer is None:
     ip_id = d['ip'].get(parser.ip)
-
-#    continue
     referer_id = d['referer'].get(parser.referer)
     uagent_id = d['uagent'].get(parser.uagent)
     uri_id = d['uri'].get(parser.uri)
+    query_id = d['query'].get(parser.query)
 
     # experimental
 #    rest_id = d['rest'].get(parser.rest)
-    query_id = d['query'].get(parser.query)
 #    tz_id = d['timezone'].get(parser.tz)
-#    print(parser.query)
 #    hour_id2 = d['hour'].get(hour_id)
-
 
     # Reset size to 0
     if parser.size == '-' or parser.code == '304':
@@ -323,27 +347,44 @@ for line in fd:
     else:
         proto = protocols['default']
     # Compressed line:
-#    print(vhost_id, ip_id, parser.user, parser.wtf, 
+#    print(vhost_id, ip_id, parser.ident, parser.user, 
 #          hour_id2, parser.minsec, tz_id, query_id,
 #          uri_id, rest_id, proto, parser.code, parser.size, referer_id, uagent_id)
+#    continue
 
+
+    update_hits(vhost_id, size)
+    continue
+    """
+    for time_id in (month_id, day_id, hour_id):
+        try:
+            hits[time_id][vhost_id]['hits'] += 1
+            hits[time_id][vhost_id]['traffic'] += size
+        except KeyError:
+            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+    continue
+    """
 
     # Increments hits
     # #########################
     cnt = collections.Counter({'hits': 1, 'traffic': size})
+#    cnt = counter({'hits': 1, 'traffic': size})
     for time_id in (month_id, day_id, hour_id):
 #        print(i, time_id)
         if not vhost_id in hits[time_id]:
-#            hits[time_id][vhost_id] = cnt
-            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+            hits[time_id][vhost_id] = cnt
+#            inserts += 1
+#            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
 #            print(hits[time_id][vhost_id])
         else:
-#            hits[time_id][vhost_id] += cnt
-            hits[time_id][vhost_id]['hits'] += 1
-            hits[time_id][vhost_id]['traffic'] += size
+            hits[time_id][vhost_id] += cnt
+#            updates += 1
+#            hits[time_id][vhost_id]['hits'] += 1
+#            hits[time_id][vhost_id]['traffic'] += size
             
-#    continue
+    continue
 
+    cnt = collections.Counter({'hits': 1, 'traffic': size})
     ### Insert Special (vhost 0 for global stat)
     for time_id in (month_id, day_id, hour_id):
         if not 0 in hits[time_id]:
@@ -451,6 +492,7 @@ for line in fd:
 
     # Countries
     # #########################
+    continue
     if parser.ip not in country_cache:
 #        print('resolving for', parser.ip)
         countryName, countryCode = geoip.query(parser.ip)
@@ -474,11 +516,11 @@ for line in fd:
     # #########################
 
 
-
 print('stopped after', i, 'lines')
 lineTimer.average()
-#        lineTimer.stop('parsed %10d lines' % i, i)
-#exit()
+sTimer.show('end of parsing')
+
+print('inserts', inserts, 'updates', updates)
 
 # Commit trial
 for dbname in storer.dbs:
@@ -542,7 +584,11 @@ formatHITS = "INSERT INTO hits (vhost_id, date, frequency, hits, traffic) VALUES
 formatHITS2 = 'SELECT hits, traffic FROM hits WHERE vhost_id = ? AND date = ?'
 updateHITS = 'UPDATE hits SET hits = ?, traffic = ? WHERE vhost_id = ? AND date = ?'
 frequencies = {6:'month', 8:'day', 10:'hour'}
+sTimer.show('SAVING HITS')
 working('saving hits... ')
+selects = 0
+updates = 0
+inserts = 0
 for time_id in hits:
     # Get the month_id (to target the database where to write)
     month_id = time_id[0:6]
@@ -555,25 +601,35 @@ for time_id in hits:
         # check if does not exist already...
 #        print('checking', vhost, time_id)
         r = conn.execute(formatHITS2, (vhost, time_id))
+        selects += 1
         res = r.fetchone()
         cnt = hits[time_id][vhost] # save the counter
         if res == None:
 #            print('None to be found!')
+            inserts += 1
+#            print('inserting', vhost, time_id, frequency)
             r = conn.execute(formatHITS, (vhost, time_id, frequency, 
                                           hits[time_id][vhost]['hits'], 
                                           hits[time_id][vhost]['traffic']))
         else:
             vhits, vtraffic = res
-            cnt2 = collections.Counter({'hits':vhits, 'traffic':vtraffic})
+            #cnt2 = collections.Counter({'hits':vhits, 'traffic':vtraffic})
+#            cnt2 = {'hits':vhits, 'traffic':vtraffic}
 #            print('to add:', hits[time_id][vhost]['hits'], hits[time_id][vhost]['traffic'])
 #            print('existing', vhits, vtraffic)
 #            print(cnt)
 #            print(cnt2)
 #            print(cnt+cnt2)
-            cnt3 = cnt + cnt2
+
+            #cnt3 = cnt + cnt2
+            cnt3 = {'hits': vhits + hits[time_id][vhost]['hits'], 
+                    'traffic': vtraffic + hits[time_id][vhost]['traffic']}
+            updates += 1
             r = conn.execute(updateHITS, (cnt3['hits'], cnt3['traffic'], vhost, time_id))
 #            print('Found some entry already, updating..')
 #        print('\t',time_id, vhost, hits[time_id][vhost])
 
     conn.commit()
 print('done')
+print('selects', selects, 'inserts', inserts, 'updates', updates)
+sTimer.show('saved %d hits' % selects)
