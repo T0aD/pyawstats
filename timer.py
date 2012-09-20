@@ -1,5 +1,18 @@
 import time
 
+class timeit():
+    def __init__(self):
+        self.start = time.time()
+        self.save()
+    def save(self):
+        self.current = time.time()
+    def show(self, msg):
+        diff1 = '%.02f' % ((time.time() - self.start) * 1000)
+        diff2 = '%.02f' % ((time.time() - self.current) * 1000)
+        format = 'TIMER: %9s - %9s ms > %s'
+        print(format % (diff1, diff2, msg))
+        self.save()
+
 class timer:
     av = []
     def __init__(self, lines = 0):
