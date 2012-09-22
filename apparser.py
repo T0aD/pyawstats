@@ -29,7 +29,8 @@ class apparser:
     # Configuration
     months = {'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun':'06',
               'Jul':'07', 'Aug':'08', 'Sep':'09', 'Oct': '10', 'Nov':'11', 'Dec':'12'}
-    notapage = {'css':1, 'js':1, 'class':1, 'gif':1, 'jpg':1, 'jpeg':1, 'png':1, 'bmp':1, 'swf':1}
+    notapage = {'css':1, 'js':1, 'class':1, 'gif':1, 'jpg':1, 
+                'jpeg':1, 'png':1, 'bmp':1, 'swf':1, 'ico': 1}
 
     # Apache line pattern
     pattern = '^([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+) \[(.+?)\] "(.+?)" ([^ ]+) ([^ ]+) "(.+?|)" "(.+?|)"$'
@@ -147,14 +148,19 @@ class apparser:
         filename = os.path.basename(uri)
         if not filename == '' and not filename.find('.') == -1:
             g, ext = filename.rsplit('.', 1)
+#            if not ext.islower():
+#                print('NOT LOWER:', ext, ext.lower())
+            ext = ext.lower()
 
 #        if not code in self.codes:
 #            self.codes[code] = True
+
         if not ext is None:
             if not ext in self.exts:
                 self.exts[ext] = True
             if not ext in self.notapage:
                 self.is_page = True
+#                print('is page', ext)
 #            if not self.pages.has_key(ext):
 #                self.pages[ext] = True
 
