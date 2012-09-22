@@ -610,23 +610,39 @@ for time_id in statsWeekdays:
 
 class stats_base:
     def __init__(self, connection):
+        self.stats = {'select': 0, 'insert': 0, 'update': 0}
         self.connection = connection
         self.SCHEMA = self.SCHEMA % self.TABLE
         self.INSERT = self.INSERT % self.TABLE
         self.SELECT = self.SELECT % self.TABLE
         self.UPDATE = self.UPDATE % self.TABLE
+        self.INDEX = "CREATE INDEX %s_index_%d ON %s (%s)"
+        try:
+            indexes = self.INDEXES
+        except AttributeError:
+            indexes = []
         try:
             self.cursor().execute(self.SCHEMA)
+            # Auto-generate indexes
+            count = 1
+            for index in indexes:
+                self.cursor().execute(self.INDEX % (self.TABLE, count, self.TABLE, index))
         except sqlite3.OperationalError:
             pass
     def cursor(self):
         return self.connection.cursor()
     def select(self, **args):
+        self.stats['select'] += 1
         return self.cursor().execute(self.SELECT, args).fetchone()
     def insert(self, **args):
+        self.stats['insert'] += 1
         self.cursor().execute(self.INSERT, args)
     def update(self, **args):
+        self.stats['update'] += 1
         self.cursor().execute(self.UPDATE, args)
+    def changes(self):
+        return "%s inserts: %d updates: %d" % (
+            self.TABLE, self.stats['insert'], self.stats['update'])
 
 # Writing extensions stats
 ######################################################################################
@@ -637,6 +653,7 @@ class stats_extensions(stats_base):
     INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
     UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
     SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+    INDEXES = ['vhost_id, ext']
 
 statsExtensionswrites = 0
 for time_id in statsExtensions:
@@ -651,7 +668,8 @@ for time_id in statsExtensions:
             statsExtensionswrites += 1
             continue
             print(time_id, vhost_id, ext, statsExtensions[time_id][vhost_id][ext])
-sTimer.show('statsExtensions writes: %d' % statsExtensionswrites)
+    sTimer.show(db.changes())
+#sTimer.show('statsExtensions writes: %d' % statsExtensionswrites)
 
 # Writing URI stats
 #####################################################################################
@@ -662,16 +680,7 @@ class stats_uris(stats_base):
     INSERT = "INSERT INTO %s (vhost_id, uri_id, size, traffic) VALUES (:vhost, :uri, :size, :traffic)"
     UPDATE = "UPDATE %s SET size =:size, traffic =:traffic WHERE vhost_id = :vhost AND uri_id = :uri"
     SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND uri_id = :uri"
-    def insert2(self, vhost_id, uri_id, size, traffic):
-        cu = self.cursor()
-        cu.execute(self.INSERT, (vhost_id, uri_id, size, traffic))
-    def select2(self, vhost_id, uri):
-        cu = self.cursor()
-        cu.execute(self.SELECT, (vhost_id, uri_id))
-        return cu.fetchone()
-    def update2(self, vhost_id, uri_id, size, traffic):
-        cu = self.cursor()
-        cu.execute(self.UPDATE, (size, traffic, vhost_id, uri_id))
+    INDEXES = ['vhost_id, uri_id']
 
 statsURIwrites = 0
 for time_id in statsURI:
@@ -686,7 +695,8 @@ for time_id in statsURI:
             statsURIwrites += 1
             continue
             print(time_id, vhost_id, ext, statsExtensions[time_id][vhost_id][ext])
-sTimer.show('statsURI writes: %d' % statsURIwrites)
+    sTimer.show(db.changes())
+#sTimer.show('statsURI writes: %d' % statsURIwrites)
 
 
 for time_id in codes:
