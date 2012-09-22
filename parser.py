@@ -44,7 +44,6 @@ total = 0
 
 import sqlite3
 
-
 schema_hits = """
 CREATE TABLE hits (
         date integer,
@@ -209,13 +208,21 @@ class storer:
         c.commit()
         return self.dbs[id]
 
-    def commit(self, id):
+    def getConnection(self, id):
+        db = self.get(id)
+        return db['conn']
+
+    def write(self, id):
         d = self.get(id)
         for name in d:
             if name == 'conn':
                 continue
             d[name].save()
-        d['conn'].commit()
+#        d['conn'].commit()
+
+    def commitAll(self):
+        for db in self.dbs:
+            self.dbs[db]['conn'].commit()
 
 storer = storer()
 
@@ -233,27 +240,11 @@ statsWeekdays = collections.defaultdict(dict)
 statsHours = collections.defaultdict(dict)
 statsDays = collections.defaultdict(dict)
 statsIP = collections.defaultdict(dict)
+statsURI = collections.defaultdict(dict)
 
 counter = collections.Counter
 
 protocols = {'HTTP/1.0':0, 'HTTP/1.1':1, 'default':0}
-
-# Test
-#hits = {}
-def update_hits2(vhost_id, size):
-    global hits
-    for time_id in (month_id, day_id, hour_id):
-        try:
-            hits[time_id][vhost_id]['hits'] += 1
-            hits[time_id][vhost_id]['traffic'] += size
-        except KeyError:
-            try:
-                hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
-            except KeyError:
-#                print('first!', time_id)
-                hits[time_id] = {}
-                hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
-
 
 def update_hits(vhost_id, size):
     global hits
@@ -263,7 +254,6 @@ def update_hits(vhost_id, size):
             hits[time_id][vhost_id]['traffic'] += size
         except KeyError:
             hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
-
 
 # Reading logfile
 try:
@@ -276,7 +266,6 @@ try:
 except Exception as e:
     die(e)
 
-#parser = apparser()
 import apparser
 parser = apparser.apparser()
 
@@ -286,8 +275,10 @@ sTimer = timer.timeit()
 first = True
 shit = []
 country_cache = {}
+weekday_cache = {}
 updates = 0
 inserts = 0
+exceptions = 0
 for line in fd:
     if (i % 10001) == 0 and not i == 0:
         lineTimer.stop('parsed %10d lines' % i, i)
@@ -298,7 +289,8 @@ for line in fd:
     if gzipped is True:
         r = parser.feed(line.decode('ascii'))
     else:
-        r = parser.feed(line)
+        r = parser.feed(line) # 44,000 lines per sec
+
     if r == False:
         # Do we need to log those ? maybe so.. maybe so...
 #        print("FALSE", line)
@@ -308,14 +300,14 @@ for line in fd:
     month_id = parser.year + parser.month
     day_id = month_id + parser.day
     hour_id = day_id + parser.hour
+    minute_id = hour_id + parser.min
 
     d = storer.get(month_id)
-
 
     # Load previous parsing results if any (only the first line)
     if first is True:
 #        preload_hits(d, month_id, day_id, hour_id)
-        print(month_id, day_id, hour_id)
+#        print(month_id, day_id, hour_id)
         first = False
 
     # Collect unique informations
@@ -340,6 +332,8 @@ for line in fd:
     if parser.referer == '-' or parser.referer == '':
         parser.referer = None
 
+    # Page count
+    page = int(parser.is_page)
 
     # Compressor ?
     if parser.proto in protocols:
@@ -353,8 +347,14 @@ for line in fd:
 #    continue
 
 
+    # Increments hits
+    # #########################
     update_hits(vhost_id, size)
-    continue
+
+    ### Insert Special (vhost 0 for global stat)
+    update_hits(0, size)
+
+#    continue
     """
     for time_id in (month_id, day_id, hour_id):
         try:
@@ -363,7 +363,7 @@ for line in fd:
         except KeyError:
             hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
     continue
-    """
+
 
     # Increments hits
     # #########################
@@ -391,10 +391,11 @@ for line in fd:
             hits[time_id][0] = cnt
         else:
             hits[time_id][0] += cnt
+    """
 
     # Increments referers
     # #########################
-    if not parser.referer is None:
+    if parser.referer is not None:
         if parser.is_page == True:
             cnt = collections.Counter({'pages': 1, 'hits': 1})
         else:
@@ -433,6 +434,7 @@ for line in fd:
 
     # Clients
     # #########################
+    """
     cnt = collections.Counter({'hits':1, 'traffic':size})
     if not vhost_id in statsIP[month_id]:
         statsIP[month_id][vhost_id] = {}
@@ -440,11 +442,35 @@ for line in fd:
         statsIP[month_id][vhost_id][ip_id] = cnt
     else:
         statsIP[month_id][vhost_id][ip_id] += cnt
-
+    """
+#    print('IS PAGE:', parser.is_page, int(parser.is_page))
+#    if parser.is_page is True:
+#        print('is page !', parser.uri)
+#        page = 1
+#    else:
+#        page = 0
+    try:
+        statsIP[month_id][vhost_id][ip_id]['hits'] += 1
+        statsIP[month_id][vhost_id][ip_id]['traffic'] += size
+        # I dont think its necessary to compare with old date:
+        statsIP[month_id][vhost_id][ip_id]['last'] = minute_id 
+        # pages?
+        statsIP[month_id][vhost_id][ip_id]['pages'] += page
+    except KeyError:
+        try:
+            statsIP[month_id][vhost_id][ip_id] = {'hits': 1, 'traffic': size, 'last': minute_id,
+                                                  'pages': page}
+        except KeyError:
+            try:
+                statsIP[month_id][vhost_id] = {}
+                statsIP[month_id][vhost_id][ip_id] = {'hits': 1, 'traffic': size,
+                                                      'last': minute_id, 'pages': page}
+            except KeyError:
+                raise
 
     # Month days
     # #########################
-    cnt = collections.Counter({'hits':1, 'traffic':size})
+#    cnt = collections.Counter({'hits':1, 'traffic':size})
     if not vhost_id in statsDays[month_id]:
         statsDays[month_id][vhost_id] = {}
     if not parser.day in statsDays[month_id][vhost_id]:
@@ -454,7 +480,7 @@ for line in fd:
 
     # Hours
     # #########################
-    cnt = collections.Counter({'hits':1, 'traffic':size})
+#    cnt = collections.Counter({'hits':1, 'traffic':size})
     if not vhost_id in statsHours[month_id]:
         statsHours[month_id][vhost_id] = {}
     if not parser.hour in statsHours[month_id][vhost_id]:
@@ -464,8 +490,12 @@ for line in fd:
 
     # Week days
     # #########################
-    weekday = datetime.date(int(parser.year), int(parser.month), int(parser.day)).weekday()
-    cnt = collections.Counter({'hits':1, 'traffic':size})
+    if day_id in weekday_cache:
+        weekday = weekday_cache[day_id]
+    else:
+        weekday = datetime.date(int(parser.year), int(parser.month), int(parser.day)).weekday()
+        weekday_cache[day_id] = weekday
+#    cnt = collections.Counter({'hits':1, 'traffic':size})
     if not vhost_id in statsWeekdays[month_id]:
         statsWeekdays[month_id][vhost_id] = {}
     if not weekday in statsWeekdays[month_id][vhost_id]:
@@ -473,14 +503,33 @@ for line in fd:
     else:
         statsWeekdays[month_id][vhost_id][weekday] += cnt
 
+    # URIs
+    # #########################
+    if page is 1:
+        try:
+            statsURI[month_id][vhost_id][uri_id]['hits'] += 1
+            statsURI[month_id][vhost_id][uri_id]['traffic'] += size
+            statsURI[month_id][vhost_id][uri_id]['size'] = size
+        except KeyError:
+            try:
+                statsURI[month_id][vhost_id][uri_id] = {'hits': 1, 
+                                                        'size': size, 'traffic': size}
+            except KeyError:
+                try:
+                    statsURI[month_id][vhost_id] = {uri_id: {'hits': 1, 'size': size,
+                                                             'traffic': size}}
+                except KeyError:
+                    raise
 
     # Visits
     # #########################
 
     # Filetypes
     # #########################
-    if not parser.ext == None:
-        cnt = collections.Counter({'hits':1, 'traffic':size})
+    if parser.ext is not None:
+#        update_extensions(vhost_id, parser.ext, size)
+
+#        cnt = collections.Counter({'hits':1, 'traffic':size})
         if not vhost_id in statsExtensions[month_id]:
             statsExtensions[month_id][vhost_id] = {}
         if not parser.ext in statsExtensions[month_id][vhost_id]:
@@ -516,29 +565,36 @@ for line in fd:
     # #########################
 
 
-print('stopped after', i, 'lines')
-lineTimer.average()
-sTimer.show('end of parsing')
+#print('exceptions:', exceptions)
 
-print('inserts', inserts, 'updates', updates)
+lineTimer.average()
+sTimer.show('stopped after %d lines' % i)
+#print('inserts', inserts, 'updates', updates)
 
 # Commit trial
 for dbname in storer.dbs:
     print('=' * 10, dbname)
-    storer.commit(dbname)
+    storer.write(dbname)
+sTimer.show('storer.write()')
 
-#exit()
+
+statsIPwrites = 0
 for time_id in statsIP:
     for vhost_id in statsIP[time_id]:
         for ip in statsIP[time_id][vhost_id]:
+            statsIPwrites += 1
             continue
             print(time_id, vhost_id, ip, statsIP[time_id][vhost_id][ip])
+sTimer.show('statsIP writes: %d' % statsIPwrites)
 
+statsDayswrites = 0
 for time_id in statsDays:
     for vhost_id in statsDays[time_id]:
         for day in statsDays[time_id][vhost_id]:
+            statsDayswrites += 1
             continue
             print(time_id, vhost_id, day, statsDays[time_id][vhost_id][day])
+sTimer.show('statsDays writes: %d' % statsDayswrites)
 
 for time_id in statsHours:
     for vhost_id in statsHours[time_id]:
@@ -552,11 +608,86 @@ for time_id in statsWeekdays:
             continue
             print(time_id, vhost_id, weekday, statsWeekdays[time_id][vhost_id][weekday])
 
+class stats_base:
+    def __init__(self, connection):
+        self.connection = connection
+        self.SCHEMA = self.SCHEMA % self.TABLE
+        self.INSERT = self.INSERT % self.TABLE
+        self.SELECT = self.SELECT % self.TABLE
+        self.UPDATE = self.UPDATE % self.TABLE
+        try:
+            self.cursor().execute(self.SCHEMA)
+        except sqlite3.OperationalError:
+            pass
+    def cursor(self):
+        return self.connection.cursor()
+    def select(self, **args):
+        return self.cursor().execute(self.SELECT, args).fetchone()
+    def insert(self, **args):
+        self.cursor().execute(self.INSERT, args)
+    def update(self, **args):
+        self.cursor().execute(self.UPDATE, args)
+
+# Writing extensions stats
+######################################################################################
+class stats_extensions(stats_base):
+    TABLE = "stats_extensions"
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, 
+                ext text, hits integer, traffic integer)"""
+    INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
+    UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
+    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+
+statsExtensionswrites = 0
 for time_id in statsExtensions:
+    db = stats_extensions(storer.getConnection(time_id))
     for vhost_id in statsExtensions[time_id]:
         for ext in statsExtensions[time_id][vhost_id]:
+            t = statsExtensions[time_id][vhost_id][ext]
+            if db.select(vhost=vhost_id, ext=ext) is None:
+                db.insert(vhost=vhost_id, ext=ext, hits=t['hits'], traffic=t['traffic'])
+            else:
+                db.update(vhost=vhost_id, ext=ext, hits=t['hits'], traffic=t['traffic'])
+            statsExtensionswrites += 1
             continue
             print(time_id, vhost_id, ext, statsExtensions[time_id][vhost_id][ext])
+sTimer.show('statsExtensions writes: %d' % statsExtensionswrites)
+
+# Writing URI stats
+#####################################################################################
+class stats_uris(stats_base):
+    TABLE = "stats_uris"
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, 
+                uri_id integer, size integer, traffic integer)"""
+    INSERT = "INSERT INTO %s (vhost_id, uri_id, size, traffic) VALUES (:vhost, :uri, :size, :traffic)"
+    UPDATE = "UPDATE %s SET size =:size, traffic =:traffic WHERE vhost_id = :vhost AND uri_id = :uri"
+    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND uri_id = :uri"
+    def insert2(self, vhost_id, uri_id, size, traffic):
+        cu = self.cursor()
+        cu.execute(self.INSERT, (vhost_id, uri_id, size, traffic))
+    def select2(self, vhost_id, uri):
+        cu = self.cursor()
+        cu.execute(self.SELECT, (vhost_id, uri_id))
+        return cu.fetchone()
+    def update2(self, vhost_id, uri_id, size, traffic):
+        cu = self.cursor()
+        cu.execute(self.UPDATE, (size, traffic, vhost_id, uri_id))
+
+statsURIwrites = 0
+for time_id in statsURI:
+    db = stats_uris(storer.getConnection(time_id))
+    for vhost_id in statsURI[time_id]:
+        for uri in statsURI[time_id][vhost_id]:
+            t = statsURI[time_id][vhost_id][uri]
+            if db.select(vhost=vhost_id, uri=uri) is None:
+                db.insert(vhost=vhost_id, uri=uri, size=t['size'], traffic=t['traffic'])
+            else:
+                db.update(vhost=vhost_id, uri=uri, size=t['size'], traffic=t['traffic'])
+            statsURIwrites += 1
+            continue
+            print(time_id, vhost_id, ext, statsExtensions[time_id][vhost_id][ext])
+sTimer.show('statsURI writes: %d' % statsURIwrites)
+
 
 for time_id in codes:
     for vhost in codes[time_id]:
@@ -580,11 +711,19 @@ for time_id in refs:
 #exit()
 
 # Saving hits
+schema_hits = """
+CREATE TABLE hits (
+        date integer,
+        frequency text,
+        vhost_id integer,
+        hits integer,
+        traffic integer
+)
+"""
 formatHITS = "INSERT INTO hits (vhost_id, date, frequency, hits, traffic) VALUES (?,?,?,?,?)"
 formatHITS2 = 'SELECT hits, traffic FROM hits WHERE vhost_id = ? AND date = ?'
 updateHITS = 'UPDATE hits SET hits = ?, traffic = ? WHERE vhost_id = ? AND date = ?'
 frequencies = {6:'month', 8:'day', 10:'hour'}
-sTimer.show('SAVING HITS')
 working('saving hits... ')
 selects = 0
 updates = 0
@@ -629,7 +768,11 @@ for time_id in hits:
 #            print('Found some entry already, updating..')
 #        print('\t',time_id, vhost, hits[time_id][vhost])
 
-    conn.commit()
+#    conn.commit()
 print('done')
 print('selects', selects, 'inserts', inserts, 'updates', updates)
 sTimer.show('saved %d hits' % selects)
+
+storer.commitAll()
+sTimer.show('storer.commitAll()')
+
