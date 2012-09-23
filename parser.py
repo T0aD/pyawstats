@@ -321,25 +321,11 @@ for line in fd:
     # We save them only if the page was found ?
     # #########################
     if parser.referer is not None:
-#        if parser.is_page == True:
-#            cnt = collections.Counter({'pages': 1, 'hits': 1})
-#        else:
-#            cnt = collections.Counter({'hits': 1})
-
         try:
             refs[month_id][vhost_id][referer_id]['pages'] += page
             refs[month_id][vhost_id][referer_id]['hits'] += hits
         except:
             refs[month_id][vhost_id] = {referer_id: {'pages': page, 'hits': hits}}
-
-#        for time_id in (month_id,):
-#        for time_id in (month_id, day_id, hour_id):
-#            if not vhost_id in refs[time_id]:
-#                refs[time_id][vhost_id] = {}
-#            if not referer_id in refs[time_id][vhost_id]:
-#                refs[time_id][vhost_id][referer_id] = cnt
-#            else:
-#                refs[time_id][vhost_id][referer_id] += cnt
 
     # Increment 404 errors
     # #########################
@@ -361,32 +347,8 @@ for line in fd:
     except:
         codes[month_id][vhost_id] = {parser.code: {'hits': 1, 'traffic': size}}
 
-    if False:        
-        cnt = collections.Counter({'hits':1, 'traffic':size})
-        if not vhost_id in codes[month_id]:
-            codes[month_id][vhost_id] = {}
-        if not parser.code in codes[month_id][vhost_id]:
-            codes[month_id][vhost_id][parser.code] = cnt
-        else:
-            codes[month_id][vhost_id][parser.code] += cnt
-
     # Clients
     # #########################
-    """
-    cnt = collections.Counter({'hits':1, 'traffic':size})
-    if not vhost_id in statsIP[month_id]:
-        statsIP[month_id][vhost_id] = {}
-    if not ip_id in statsIP[month_id][vhost_id]:
-        statsIP[month_id][vhost_id][ip_id] = cnt
-    else:
-        statsIP[month_id][vhost_id][ip_id] += cnt
-    """
-#    print('IS PAGE:', parser.is_page, int(parser.is_page))
-#    if parser.is_page is True:
-#        print('is page !', parser.uri)
-#        page = 1
-#    else:
-#        page = 0
     try:
         statsIP[month_id][vhost_id][ip_id]['hits'] += 1
         statsIP[month_id][vhost_id][ip_id]['traffic'] += size
@@ -399,12 +361,8 @@ for line in fd:
             statsIP[month_id][vhost_id][ip_id] = {'hits': 1, 'traffic': size, 'last': minute_id,
                                                   'pages': page}
         except KeyError:
-            try:
-                statsIP[month_id][vhost_id] = {}
-                statsIP[month_id][vhost_id][ip_id] = {'hits': 1, 'traffic': size,
-                                                      'last': minute_id, 'pages': page}
-            except KeyError:
-                raise
+            statsIP[month_id][vhost_id] = {ip_id: {'hits': 1, 'traffic': size,
+                                                   'last': minute_id, 'pages': page}}
 
     # Month days
     # #########################
@@ -413,14 +371,6 @@ for line in fd:
         statsDays[month_id][vhost_id][day_id]['traffic'] += size
     except:
         statsDays[month_id][vhost_id] = {day_id: {'hits': 1, 'traffic': size}}
-    #    cnt = collections.Counter({'hits':1, 'traffic':size})
-    if False:
-        if not vhost_id in statsDays[month_id]:
-            statsDays[month_id][vhost_id] = {}
-        if not parser.day in statsDays[month_id][vhost_id]:
-            statsDays[month_id][vhost_id][parser.day] = cnt
-        else:
-            statsDays[month_id][vhost_id][parser.day] += cnt
 
     # Hours
     # #########################
@@ -429,14 +379,6 @@ for line in fd:
         statsHours[month_id][vhost_id][hour_id]['traffic'] += size
     except:
         statsHours[month_id][vhost_id] = {hour_id: {'hits': 1, 'traffic': size}}
-    if False:
-        #    cnt = collections.Counter({'hits':1, 'traffic':size})
-        if not vhost_id in statsHours[month_id]:
-            statsHours[month_id][vhost_id] = {}
-        if not parser.hour in statsHours[month_id][vhost_id]:
-            statsHours[month_id][vhost_id][parser.hour] = cnt
-        else:
-            statsHours[month_id][vhost_id][parser.hour] += cnt
 
     # Week days
     # #########################
@@ -451,16 +393,6 @@ for line in fd:
     except:
         statsWeekdays[month_id][vhost_id] = {weekday: {'hits': 1, 'traffic': size}}
 
-
-    if False:
-        #    cnt = collections.Counter({'hits':1, 'traffic':size})
-        if not vhost_id in statsWeekdays[month_id]:
-            statsWeekdays[month_id][vhost_id] = {}
-        if not weekday in statsWeekdays[month_id][vhost_id]:
-            statsWeekdays[month_id][vhost_id][weekday] = cnt
-        else:
-            statsWeekdays[month_id][vhost_id][weekday] += cnt
-
     # Visits
     # #########################
 
@@ -473,16 +405,7 @@ for line in fd:
         except:
             statsExtensions[month_id][vhost_id] = {parser.ext: {'hits': 1, 'traffic': size}}
 
-    if False:
-#        update_extensions(vhost_id, parser.ext, size)
-
-#        cnt = collections.Counter({'hits':1, 'traffic':size})
-        if not vhost_id in statsExtensions[month_id]:
-            statsExtensions[month_id][vhost_id] = {}
-        if not parser.ext in statsExtensions[month_id][vhost_id]:
-            statsExtensions[month_id][vhost_id][parser.ext] = cnt
-        else:
-            statsExtensions[month_id][vhost_id][parser.ext] += cnt
+    #update_extensions(vhost_id, parser.ext, size)
 
     # OS
     # #########################
