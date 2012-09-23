@@ -55,6 +55,6 @@ for ip in posts:
         for url in uris[ip]:
             print('-'*10, url, uris[ip][url]['hits'], sep='\t')
         # Last: IP localization
-        cName, cCode = g.query(ip)
-        print('IP INFORMATION', cName, cCode, sep='\t')
+#        cName, cCode = g.query(ip)
+#        print('IP INFORMATION', cName, cCode, sep='\t')
         print('-' * 60)

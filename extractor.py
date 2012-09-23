@@ -22,7 +22,8 @@ while True:
         inside = True
         continue
     elif line == '# END':
-        break
+        inside = False
+        continue
     if inside == True:
         print(line)
 
