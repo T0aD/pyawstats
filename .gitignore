@@ -1,2 +1,4 @@
 *.sqlite
 *.pyc
+*.log
+*.gz

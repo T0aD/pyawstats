@@ -168,10 +168,10 @@ class apparser:
 
 
         # Check if we logged the reverse host instead of real IP address
-        first = ord(ip[0])
-        if first < 49 or first > 57:
+#        first = ord(ip[0])
+#        if first < 49 or first > 57:
 #            print('NOT AN IP:', ip)
-            pass
+#            pass
 #            print('*', end='')
         
 #        if not self.num.match(ip):

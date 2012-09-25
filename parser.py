@@ -33,8 +33,6 @@ if not sys.argv[1].startswith('/'):
 else:
     logfile = os.path.realpath(sys.argv[1])
 
-# BEGIN
-
 import sqlite3
 
 class uniques:
@@ -160,8 +158,6 @@ class storer:
         for db in self.dbs:
             self.dbs[db]['conn'].rollback()
 
-# END
-
 storer = storer()
 
 #hits = {}
@@ -183,14 +179,18 @@ counter = collections.Counter
 
 protocols = {'HTTP/1.0':0, 'HTTP/1.1':1, 'default':0}
 
-def update_hits(vhost_id, size):
+def update_hits(vhost_id, size, page, hour_id):
+#def update_hits(vhost_id, size):
     global hits
-    for time_id in (month_id, day_id, hour_id):
+#    print(month_id, day_id, hour_id)
+#    for time_id in (month_id, day_id, hour_id):
+    for time_id in (hour_id,):
         try:
             hits[time_id][vhost_id]['hits'] += 1
+            hits[time_id][vhost_id]['pages'] += page
             hits[time_id][vhost_id]['traffic'] += size
         except KeyError:
-            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size}
+            hits[time_id][vhost_id] = {'hits': 1, 'traffic': size, 'pages': page}
 
 # Reading logfile
 try:
@@ -206,6 +206,13 @@ except Exception as e:
 import apparser
 parser = apparser.apparser()
 
+# ##
+import geoip
+geoip = geoip.geoip('geoip.sqlite')
+countries = {}
+ips2countries = {}
+useragents = {}
+##
 
 lineTimer = timer.timer()
 sTimer = timer.timeit()
@@ -219,8 +226,8 @@ i = 0
 for line in fd:
     if (i % 10001) == 0 and not i == 0:
         lineTimer.stop('parsed %10d lines' % i, i)
-    if i > passes:
-        break
+#    if i > passes:
+#        break
     i += 1 # heresy!
 
     if gzipped is True:
@@ -312,10 +319,11 @@ for line in fd:
 
     # Increments hits
     # #########################
-    update_hits(vhost_id, size)
+    update_hits(vhost_id, size, page, hour_id)
+#    update_hits(vhost_id, size)
 
     ### Insert Special (vhost 0 for global stat)
-    update_hits(0, size) # to move for post-processing (not main loop)
+#    update_hits(0, size, page, ) # to move for post-processing (not main loop)
 
     # Increments referers
     # We save them only if the page was found ?
@@ -364,9 +372,21 @@ for line in fd:
             statsIP[month_id][vhost_id] = {ip_id: {'hits': 1, 'traffic': size,
                                                    'last': minute_id, 'pages': page}}
 
+
+    # Countries: only loss of 800 lines per sec!!!
+    if ip_id not in ips2countries: # not resolved yet
+#        print(ip_id, parser.ip)
+        country, country_code = geoip.query(parser.ip)
+#        print(country, country_code)
+        if country_code not in countries:
+            countries[country_code] = country
+        ips2countries[ip_id] = country_code
+
+    """
     # Month days
     # #########################
     try:
+#    parser.day
         statsDays[month_id][vhost_id][day_id]['hits'] += 1
         statsDays[month_id][vhost_id][day_id]['traffic'] += size
     except:
@@ -375,6 +395,7 @@ for line in fd:
     # Hours
     # #########################
     try:
+#    parser.hour
         statsHours[month_id][vhost_id][hour_id]['hits'] += 1
         statsHours[month_id][vhost_id][hour_id]['traffic'] += size
     except:
@@ -392,6 +413,7 @@ for line in fd:
         statsWeekdays[month_id][vhost_id][weekday]['traffic'] += size
     except:
         statsWeekdays[month_id][vhost_id] = {weekday: {'hits': 1, 'traffic': size}}
+    """
 
     # Visits
     # #########################
@@ -407,66 +429,126 @@ for line in fd:
 
     #update_extensions(vhost_id, parser.ext, size)
 
+    # User-agents (to generate os, browser and robots stats at post-processing)
+    # ########################
+
+    continue
     # OS
     # #########################
     # Browser
     # #########################
-#    ua = hua.simple_detect(parser.uagent)
-#    ua2 = hua.detect(parser.uagent)
+    
+    if uagent_id not in useragents:
+        ua = hua.simple_detect(parser.uagent)
+        useragents[uagent_id] = ua
+#    print('UA1', ua, parser.uagent)
+#   ua2 = hua.detect(parser.uagent)
+#    print('UA2', ua2)
 
     # Robots
     # #########################
 
 
-#print('exceptions:', exceptions)
-
 lineTimer.average()
 sTimer.show('stopped after %d lines' % i)
-#print('inserts', inserts, 'updates', updates)
 
-# Commit trial
+# Writing unique values into DB
 for dbname in storer.dbs:
     print('=' * 10, dbname)
     storer.write(dbname)
 sTimer.show('storer.write()')
+storer.commitAll()
 
 
-statsIPwrites = 0
-for time_id in statsIP:
-    for vhost_id in statsIP[time_id]:
-        for ip in statsIP[time_id][vhost_id]:
-            statsIPwrites += 1
-            continue
-            print(time_id, vhost_id, ip, statsIP[time_id][vhost_id][ip])
-sTimer.show('statsIP writes: %d' % statsIPwrites)
+######################################################################################
+# Post processing (to speed up parsing of log file)
+# Generates: statsHours, statsDays, statsWeekdays, global hits (all vhosts)
+# hits for days, months
+######################################################################################
+hitsMonth = collections.defaultdict(dict)
+hitsDay = collections.defaultdict(dict)
+weekday_cache = {}
+statsHours = collections.defaultdict(dict)
+statsDays = collections.defaultdict(dict)
+statsWeekdays = collections.defaultdict(dict)
+for hour_id in hits:
+    # Compute time values:
+    month_id = hour_id[:6]
+    day_id = hour_id[:8]
+    day = hour_id[6:8]
+    hour = hour_id[8:10]
 
-statsDayswrites = 0
-for time_id in statsDays:
-    for vhost_id in statsDays[time_id]:
-        for day in statsDays[time_id][vhost_id]:
-            statsDayswrites += 1
-            continue
-            print(time_id, vhost_id, day, statsDays[time_id][vhost_id][day])
-sTimer.show('statsDays writes: %d' % statsDayswrites)
+    if day_id in weekday_cache:
+        weekday = weekday_cache[day_id]
+    else:
+        weekday = datetime.date(int(hour_id[:4]), int(hour_id[4:6]), int(hour_id[6:8])).weekday()
+        weekday_cache[day_id] = weekday
 
-for time_id in statsHours:
-    for vhost_id in statsHours[time_id]:
-        for hour in statsHours[time_id][vhost_id]:
-            continue
-            print(time_id, vhost_id, hour, statsHours[time_id][vhost_id][hour])
+    for vhost in hits[hour_id]:
+        t = hits[hour_id][vhost]['traffic']
+        h = hits[hour_id][vhost]['hits']
+        p = hits[hour_id][vhost]['pages']
 
-for time_id in statsWeekdays:
-    for vhost_id in statsWeekdays[time_id]:
-        for weekday in statsWeekdays[time_id][vhost_id]:
-            continue
-            print(time_id, vhost_id, weekday, statsWeekdays[time_id][vhost_id][weekday])
+        # statsHours
+        for v_id in (vhost, 0):
+            try:
+                statsHours[month_id][v_id][hour]['hits'] += h
+                statsHours[month_id][v_id][hour]['pages'] += p
+                statsHours[month_id][v_id][hour]['traffic'] += t
+            except:
+                statsHours[month_id][v_id] = {hour: {'hits': 1, 'pages': p, 'traffic': size}}
 
+        # statsDays
+        for v_id in (vhost, 0):
+            try:
+                statsDays[month_id][v_id][day]['hits'] += h
+                statsDays[month_id][v_id][day]['pages'] += p
+                statsDays[month_id][v_id][day]['traffic'] += t
+            except:
+                statsDays[month_id][v_id] = {day: {'hits': 1, 'pages': p, 'traffic': size}}
+
+        # statsWeekdays
+        for v_id in (vhost, 0):
+            try:
+                statsWeekdays[month_id][v_id][weekday]['hits'] += 1
+                statsWeekdays[month_id][v_id][weekday]['traffic'] += size
+            except:
+                statsWeekdays[month_id][v_id] = {weekday: {'hits': 1, 'traffic': size}}
+
+        # Hits for month (+ global)
+        for v_id in (vhost, 0):
+            try:
+                hitsMonth[month_id][v_id]['traffic'] += t
+                hitsMonth[month_id][v_id]['pages'] += p
+                hitsMonth[month_id][v_id]['hits'] += h
+            except:
+                hitsMonth[month_id][v_id] = {'traffic': t, 'pages': p, 'hits': h}
+        # Hits for days (+ global)
+        for v_id in (vhost, 0):
+            try:
+                hitsDay[day_id][v_id]['traffic'] += t
+                hitsDay[day_id][v_id]['pages'] += p
+                hitsDay[day_id][v_id]['hits'] += h
+            except:
+                hitsDay[day_id][v_id] = {'traffic': t, 'pages': p, 'hits': h}
+#    print('PROCESS AFTER')
+sTimer.show('post-processing done')
+#exit()
+
+######################################################################################
+# Base for stats objects
+###
 class stats_base:
     def __init__(self, connection):
-        print('created', self.__class__.__name__)
+        try:
+            self.TABLE = self.TABLE
+        except:
+            self.TABLE = self.__class__.__name__
+#        print('created', self.__class__.__name__)
         self.stats = {'select': 0, 'insert': 0, 'update': 0}
         self.connection = connection
-        self.SCHEMA = self.SCHEMA % self.TABLE
+        self.connection.row_factory = sqlite3.Row
+        self.SCHEMA %= self.TABLE
         self.INSERT = self.INSERT % self.TABLE
         self.SELECT = self.SELECT % self.TABLE
         self.UPDATE = self.UPDATE % self.TABLE
@@ -494,14 +576,55 @@ class stats_base:
     def update(self, **args):
         self.stats['update'] += 1
         self.cursor().execute(self.UPDATE, args)
+#        print('updating with', args)
+#        exit()
+
     def save(self, **args):
-        if self.select(**args) is None:
+        r = self.select(**args)
+        if r is None:
+#        if self.select(**args) is None:
             self.insert(**args)
         else:
+            # Use columns returned by SELECT to increment values:
+            for key in r.keys():
+#                print('key:', key, 'db val:', r[key], 'new val:', args[key])
+#                print('type of', key, ':', type(args[key]))
+                if type(args[key]) is int: # dont increment strings LAWL!
+                    args[key] += r[key]
+#                if key == 'last':
+#                    print('new arg for last', args[key])
+#            print(r.keys(),args)
             self.update(**args)
     def changes(self):
         return "%s inserts: %d updates: %d" % (
             self.TABLE, self.stats['insert'], self.stats['update'])
+
+
+# Writing extensions stats
+######################################################################################
+class stats_ip(stats_base):
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, ip_id integer,
+                pages integer, hits integer, traffic integer, last text)"""
+    INSERT = """INSERT INTO %s (vhost_id, ip_id, last, pages, hits, traffic) 
+                VALUES (:vhost, :ip, :last, :pages, :hits, :traffic)"""
+    UPDATE = """UPDATE %s SET hits = :hits, traffic = :traffic, pages = :pages, last = :last
+                WHERE vhost_id = :vhost AND ip_id = :ip"""
+    SELECT = """SELECT hits, traffic, pages, last FROM %s WHERE 
+                vhost_id = :vhost AND ip_id = :ip"""
+    INDEXES = ['vhost_id, ip_id']
+
+for time_id in statsIP:
+    db = stats_ip(storer.getConnection(time_id))
+    for vhost_id in statsIP[time_id]:
+        for ip in statsIP[time_id][vhost_id]:
+            t = statsIP[time_id][vhost_id][ip]
+ #           print(ip, t)
+            db.save(vhost=vhost_id, ip=ip, hits=t['hits'], 
+                    last=t['last'], traffic=t['traffic'], pages=t['pages'])
+    sTimer.show(db.changes())
+
+#storer.commitAll()
+#exit()
 
 # Writing extensions stats
 ######################################################################################
@@ -511,7 +634,7 @@ class stats_extensions(stats_base):
                 ext text, hits integer, traffic integer)"""
     INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
     UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
-    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND ext = :ext"
     INDEXES = ['vhost_id, ext']
 
 for time_id in statsExtensions:
@@ -523,6 +646,87 @@ for time_id in statsExtensions:
     sTimer.show(db.changes())
 
 
+
+statsDayswrites = 0
+for time_id in statsDays:
+    for vhost_id in statsDays[time_id]:
+        for day in statsDays[time_id][vhost_id]:
+            statsDayswrites += 1
+            continue
+            print(time_id, vhost_id, day, statsDays[time_id][vhost_id][day])
+sTimer.show('statsDays writes: %d' % statsDayswrites)
+
+# Writing extensions stats
+######################################################################################
+class stats_extensions(stats_base):
+    TABLE = "stats_extensions"
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, 
+                ext text, hits integer, traffic integer)"""
+    INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
+    UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+    INDEXES = ['vhost_id, ext']
+
+for time_id in statsExtensions:
+    db = stats_extensions(storer.getConnection(time_id))
+    for vhost_id in statsExtensions[time_id]:
+        for ext in statsExtensions[time_id][vhost_id]:
+            t = statsExtensions[time_id][vhost_id][ext]
+            db.save(vhost=vhost_id, ext=ext, hits=t['hits'], traffic=t['traffic'])
+    sTimer.show(db.changes())
+
+for time_id in statsHours:
+    for vhost_id in statsHours[time_id]:
+        for hour in statsHours[time_id][vhost_id]:
+            continue
+            print(time_id, vhost_id, hour, statsHours[time_id][vhost_id][hour])
+
+# Writing extensions stats
+######################################################################################
+class stats_extensions(stats_base):
+    TABLE = "stats_extensions"
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, 
+                ext text, hits integer, traffic integer)"""
+    INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
+    UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+    INDEXES = ['vhost_id, ext']
+
+for time_id in statsExtensions:
+    db = stats_extensions(storer.getConnection(time_id))
+    for vhost_id in statsExtensions[time_id]:
+        for ext in statsExtensions[time_id][vhost_id]:
+            t = statsExtensions[time_id][vhost_id][ext]
+            db.save(vhost=vhost_id, ext=ext, hits=t['hits'], traffic=t['traffic'])
+    sTimer.show(db.changes())
+
+for time_id in statsWeekdays:
+    for vhost_id in statsWeekdays[time_id]:
+        for weekday in statsWeekdays[time_id][vhost_id]:
+            continue
+            print(time_id, vhost_id, weekday, statsWeekdays[time_id][vhost_id][weekday])
+
+# Writing extensions stats
+######################################################################################
+class stats_extensions(stats_base):
+    TABLE = "stats_extensions"
+    SCHEMA = """CREATE TABLE %s (vhost_id integer, 
+                ext text, hits integer, traffic integer)"""
+    INSERT = "INSERT INTO %s (vhost_id, ext, hits, traffic) VALUES (:vhost, :ext, :hits, :traffic)"
+    UPDATE = "UPDATE %s SET hits = :hits, traffic = :traffic WHERE vhost_id = :vhost AND ext = :ext"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND ext = :ext"
+    INDEXES = ['vhost_id, ext']
+
+for time_id in statsExtensions:
+    db = stats_extensions(storer.getConnection(time_id))
+    for vhost_id in statsExtensions[time_id]:
+        for ext in statsExtensions[time_id][vhost_id]:
+            t = statsExtensions[time_id][vhost_id][ext]
+            db.save(vhost=vhost_id, ext=ext, hits=t['hits'], traffic=t['traffic'])
+    sTimer.show(db.changes())
+
+#exit()
+
 # Writing URI stats
 #####################################################################################
 class stats_uris(stats_base):
@@ -531,10 +735,9 @@ class stats_uris(stats_base):
                 uri_id integer, size integer, traffic integer)"""
     INSERT = "INSERT INTO %s (vhost_id, uri_id, size, traffic) VALUES (:vhost, :uri, :size, :traffic)"
     UPDATE = "UPDATE %s SET size =:size, traffic =:traffic WHERE vhost_id = :vhost AND uri_id = :uri"
-    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND uri_id = :uri"
+    SELECT = "SELECT size, traffic FROM %s WHERE vhost_id = :vhost AND uri_id = :uri"
     INDEXES = ['vhost_id, uri_id']
 
-#storer.rollbackAll()
 for time_id in statsURI:
     db = stats_uris(storer.getConnection(time_id))
     for vhost_id in statsURI[time_id]:
@@ -549,7 +752,7 @@ for time_id in statsURI:
                 db.update(vhost=vhost_id, uri=uri, size=t['size'], traffic=t['traffic'])
     sTimer.show(db.changes())
 
-
+# END
 # Writing codes stats
 #####################################################################################
 class stats_codes(stats_base):
@@ -558,7 +761,7 @@ class stats_codes(stats_base):
                 code text, hits integer, traffic integer)"""
     INSERT = "INSERT INTO %s (vhost_id, code, hits, traffic) VALUES (:vhost, :code, :hits, :traffic)"
     UPDATE = "UPDATE %s SET hits =:hits, traffic =:traffic WHERE vhost_id = :vhost AND code = :code"
-    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND code = :code"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND code = :code"
     INDEXES = ['vhost_id, code']
 
 for time_id in codes:
@@ -581,7 +784,7 @@ class stats_404(stats_base):
     INSERT = """INSERT INTO %s (vhost_id, uri_id, referer_id, hits) 
                 VALUES (:vhost, :uri, :referer, :hits)"""
     UPDATE = "UPDATE %s SET hits=:hits WHERE vhost_id=:vhost AND uri_id=:uri AND referer_id=:referer"
-    SELECT = "SELECT * FROM %s WHERE vhost_id =:vhost AND uri_id=:uri AND referer_id =:referer"
+    SELECT = "SELECT hits FROM %s WHERE vhost_id =:vhost AND uri_id=:uri AND referer_id =:referer"
     INDEXES = ['vhost_id, uri_id, referer_id']
 
 for time_id in stats404:
@@ -610,7 +813,7 @@ class stats_hits(stats_base):
     INSERT = """INSERT INTO %s (vhost_id, date, frequency, hits, traffic) VALUES 
                 (:vhost, :date, :frequency, :hits, :traffic)"""
     UPDATE = "UPDATE %s SET hits =:hits, traffic =:traffic WHERE vhost_id = :vhost AND date =:date"
-    SELECT = "SELECT * FROM %s WHERE vhost_id = :vhost AND date = :date"
+    SELECT = "SELECT hits, traffic FROM %s WHERE vhost_id = :vhost AND date = :date"
     INDEXES = ['vhost_id, date']
 
 # Saving hits
