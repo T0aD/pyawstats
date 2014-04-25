@@ -23,8 +23,6 @@ class ipResolver():
         self.cache[hostname] = ret
         return ret
 
-
-
 class apparser:
     # Configuration
     months = {'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun':'06',
@@ -95,6 +93,120 @@ class apparser:
 
         self.num = re.compile('^[0-9]')
 
+
+
+    def proto(self, line):
+
+        # separators:
+        space = ' '
+        bracket = '['
+        dquote = '"'
+        qmark = '?'
+        dot = '.'
+        slash = '/'
+
+#        print('-=' * 20)
+        vhost_off = line.find(space)
+        if vhost_off == 0:
+            self.vhost = ''
+        else:
+            self.vhost = line[:vhost_off]
+#        print(line)
+#        print('vhost:', self.vhost)
+
+        ip_off = line.find(space, vhost_off + 1)
+        self.ip = line[vhost_off + 1:ip_off]
+#        print('ip:', self.ip)
+
+#        vhost, ip, ident, user, date, req, code, size, referer, uagent = m.groups()
+        ident_off = line.find(space, ip_off + 1)
+        self.ident = line[ip_off+1:ident_off]
+#        print('ident:', self.ident)
+
+        user_off = line.find(space, ident_off + 1)
+        self.user = line[ident_off+1:user_off]
+#        print('user:', self.user)
+
+        date_off = line.find(bracket, user_off + 1)
+#        print('offsets:', user_off, date_off)
+        # error parsing
+        if date_off != (user_off + 1):
+            print('PROBLEM')
+# 92.60.60.181 - - [14/Jan/2014:17:10:41 +0100] "GET / HTTP/1.1" 200 4234 "-" "-"
+        # date:
+        self.day = line[date_off+1:date_off+3]
+        self.month = line[date_off+4:date_off+7]
+        self.year = line[date_off+8:date_off+12]
+        self.hour = line[date_off+13:date_off+15]
+        self.minute = line[date_off+16:date_off+18]
+        self.second = line[date_off+19:date_off+21]
+#        print(day, month, year, hour, minute, second)
+
+        # request
+        req_off = line.find(dquote, date_off + 21) + 1
+        req_end_off = line.find(dquote, req_off)
+        request = line[req_off:req_end_off]
+#        print('request:', request)
+
+#        query, uri, proto = m.groups()
+        uri_off = request.find(space)
+        self.query = request[:uri_off]
+        protocol_off = request.rfind(space)
+        self.uri = request[uri_off+1:protocol_off]
+        self.protocol = request[protocol_off+1:]
+#        print('query:', self.query)
+#        print('uri:', uri)
+#        print('protocol:', protocol)
+
+        path_off = self.uri.find(qmark)
+        if path_off == -1:
+            path = self.uri
+        else:
+            path = self.uri[:path_off]
+#        print('path:', path)
+ 
+        extension = None
+        filename = path[path.rfind(slash)+1:]
+#        print('filename:', filename)
+
+        ext_off = filename.rfind(dot)
+        if not ext_off == -1:
+            extension = filename[ext_off+1:]
+#            extension = extension.lower()
+
+#        if not extension is None and len(extension) > 4:
+#            print('path:', path)
+#            print('filename:', filename)
+#            print('extension:', extension)
+
+#        ext = None
+#        if not filename == '' and not filename.find('.') == -1:
+#            g, ext = filename.rsplit('.', 1)
+#            ext = ext.lower()
+
+
+        # code and size
+        code_off = line.find(space, req_end_off + 2) 
+        code = line[req_end_off+2:code_off]
+#        print('code', code)
+        size_off = line.find(space, code_off + 1)
+        size = line[code_off+1:size_off]
+#        print('size', size)
+
+        # referer and user-agents
+        referer_off = line.find(dquote, size_off) + 1
+        referer_off_end = line.find(dquote, referer_off)
+        referer = line[referer_off:referer_off_end]
+        self.referer = referer
+#        print('referer:', referer)
+
+        uagent_off = line.find(dquote, referer_off_end + 1) + 1
+        uagent_off_end = line.find(dquote, uagent_off)
+        uagent = line[uagent_off:uagent_off_end]
+#        print('user-agent:', uagent)
+
+#        return (self.vhost, self.referer)
+
     # Parse apache line
     def feed(self, line):
 #        self.parsed += 1
@@ -145,7 +257,15 @@ class apparser:
         else:
             rest = ''
         ext = None
-        filename = os.path.basename(uri)
+        
+#        print('-' * 10, 'START')
+#        print(uri[uri.rfind('/')+1:])
+#        print(uri)
+        filename = uri[uri.rfind('/')+1:] # faster than:
+#        filename = os.path.basename(uri)
+#        print(filename)
+#        print('-' * 10, 'END')
+
         if not filename == '' and not filename.find('.') == -1:
             g, ext = filename.rsplit('.', 1)
 #            if not ext.islower():
